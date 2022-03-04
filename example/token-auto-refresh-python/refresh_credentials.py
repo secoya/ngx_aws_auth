@@ -14,8 +14,12 @@ import sys
 level = logging.DEBUG if '-d' in sys.argv or '--debug' in sys.argv else logging.INFO
 logging.basicConfig(stream=sys.stdout, level=level, format='%(asctime)s - %(name)s - %(levelname)s\n%(message)s')
 
-credentials_host = '169.254.170.2'
-credentials_path = os.environ.get('AWS_CONTAINER_CREDENTIALS_RELATIVE_URI', None)
+use_ec2 = os.environ.get('EC2_INSTANCE_PROFILE', None) in ['1','t','true','yes']
+if use_ec2:
+    credentials_host = '169.254.169.254'
+else:
+    credentials_host = '169.254.170.2'
+    credentials_path = os.environ.get('AWS_CONTAINER_CREDENTIALS_RELATIVE_URI', None)
 use_mock = os.environ.get('USE_MOCK', '').lower() in ['1','t','true','yes']
 aws_region = os.environ['AWS_REGION']
 aws_bucket_domain = os.environ['BUCKET_DOMAIN']
@@ -37,10 +41,19 @@ def get_timestamps():
 def get_current_creds():
     if not use_mock:
         try:
-            conn = http.client.HTTPConnection(credentials_host, timeout=5)
-            conn.request('GET', credentials_path)
-            res = conn.getresponse()
-        
+            if use_ec2:
+                profile_conn = http.client.HTTPConnection(credentials_host, timeout=5)
+                profile_conn.request('GET', '/latest/meta-data/iam/security-credentials/')
+                profile = profile_conn.getresponse().readline().decode('utf8').rstrip('/')
+
+                conn = http.client.HTTPConnection(credentials_host, timeout=5)
+                conn.request('GET', '/latest/meta-data/iam/security-credentials/%s' % profile)
+                res = conn.getresponse()
+            else:
+                conn = http.client.HTTPConnection(credentials_host, timeout=5)
+                conn.request('GET', credentials_path)
+                res = conn.getresponse()
+
             creds = json.loads(res.readline().decode('utf8'))
         except:
             logging.error("Unexpected error: %s" % (sys.exc_info()[0]))
